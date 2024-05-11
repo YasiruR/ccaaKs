@@ -1,0 +1,5 @@
+{
+  "address": "asset-cc-0-11:6051",
+  "dial_timeout": "10s",
+  "tls_required": false
+}
