@@ -1,0 +1,23 @@
+---
+log:
+  level: debug
+
+gitlab:
+  url: <gitlab-url>
+  token: <access-token>
+
+# Pull jobs related metrics on all projects
+project_defaults:
+  pull:
+    pipeline:
+      jobs:
+        enabled: true
+
+# Example public projects to monitor
+projects:
+  - name: <project-namsepace-with-path>
+    # Pull environments related metrics prefixed with 'stable' for this project
+    pull:
+      environments:
+        enabled: true
+        name_regexp: '^stable.*'
