@@ -1,0 +1,31 @@
+name: Caliper Benchmarks
+version: "2.0.0"
+
+caliper:
+  blockchain: fabric
+
+channels:
+  - channelName: '<chan-name>'
+    # the chaincodeIDs of all the fabric chaincodes in caliper-benchmarks
+    contracts:
+      - id: asset
+
+organizations:
+  - mspid: '<org-msp>'
+    identities:
+      certificates:
+        - name: '<user-name>'
+          clientPrivateKey:
+            path: '<msp-private-key-file-path>'
+          clientSignedCert:
+            path: '<msp-public-cert-path>'
+    peers:
+      - endpoint: '<peer-endpoint>'
+        tlsCACerts:
+          path: '<tls-root-cert-path>'
+        grpcOptions:
+          grpc.keepalive_timeout_ms: 20000
+          grpc.keepalive_time_ms: 120000
+          grpc.http2.min_time_between_pings_ms: 120000
+          grpc.http2.max_pings_without_data: 0
+          grpc.keepalive_permit_without_calls: 1

@@ -5,23 +5,30 @@ stages:
   - build
   - test
   - deploy
+  - evaluate
 
 variables:
   CC_NAME: asset
-  CC_VERSION: 0.1
-  CC_ID: asset_0.1:f8e7c6c
+  CC_VERSION: 0.22
+  CC_ID_STAGING: asset_0_22:f4a69b530e1f7ad77ddc6b43927e0786ef559c437e643f4f026d1df519787f0a
+  CC_ID_PROD: asset_0_22:prodtest
   CC_PORT: 6051
   REMOTE_FILE_PATH: "/home/${REMOTE_USER}/manifests"
-  LXC_NODE: master-node1
-  LXC_FILE_PATH: /root/hfb/manifests
-
-include:
-  - template: Jobs/Container-Scanning.gitlab-ci.yml
-  - template: Jobs/Dependency-Scanning.gitlab-ci.yml
+  LXC_NODE: master-node2
+  LXC_FILE_PATH: /root/manifests
+  HFB_ORG_MSP: org-msp
+  HFB_CHAN_NAME: chan1
+  HFB_USR: peer1
+  HFB_PEER_HOST: 172.17.0.1
+  HFB_PEER_PORT: 30106
 
 #workflow: #or .standard-rules
 #  rules:
 #    - if: $CI_COMMIT_BRANCH == "release"
+
+include:
+  - template: Jobs/Container-Scanning.gitlab-ci.yml
+  - template: Jobs/Dependency-Scanning.gitlab-ci.yml
 
 go-lint:
   stage: validate
@@ -83,6 +90,8 @@ build-image:
   script:
     - docker build -t "$CI_REGISTRY/$CI_PROJECT_PATH:$CC_VERSION" .
     - docker push "$CI_REGISTRY/$CI_PROJECT_PATH:$CC_VERSION"
+  after_script:
+    - docker logout "$CI_REGISTRY"
 
 container_scanning:
   tags:
@@ -102,20 +111,85 @@ gemnasium-dependency_scanning:
   needs:
     - build-image
 
-deploy-kubernetes:
+deploy-staging:
   stage: deploy
   tags:
     - ccaas-runner
+  environment:
+    name: staging
+    url: https://staging.example.com
   before_script:
     - K8S_VERSION=$(tr '.' '-' <<< $CC_VERSION)
-    - bash scripts/create-manifest.sh "$CC_ID" "$CC_NAME" "$CC_VERSION" "$K8S_VERSION" "$CC_PORT" "$CI_REGISTRY/$CI_PROJECT_PATH"
+    - bash scripts/create-manifest.sh "$CC_ID_STAGING" "$CC_NAME" "$CC_VERSION" "$K8S_VERSION" "$CC_PORT" "$CI_REGISTRY/$CI_PROJECT_PATH"
     - apt-get update && apt-get install -y openssh-client
     - chmod 600 $VAR_PATH/KEY_FILE
+    - ls k8s
+    - cat k8s/cc-$CC_NAME-$K8S_VERSION.yaml
+    - ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "$REMOTE_USER@$STAGING_IP" "mkdir -p $REMOTE_FILE_PATH"
   script:
-    - scp -i "$KEY_FILE" -o StrictHostKeyChecking=no "./k8s/cc-$CC_NAME-$K8S_VERSION.yaml" "$REMOTE_USER@$REMOTE_ADDRESS:$REMOTE_FILE_PATH"
+    - scp -i "$KEY_FILE" -o StrictHostKeyChecking=no "./k8s/cc-$CC_NAME-$K8S_VERSION.yaml" "$REMOTE_USER@$STAGING_IP:$REMOTE_FILE_PATH"
     - >
-      ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_ADDRESS" "lxc exec $LXC_NODE -- kubectl delete secret gitlabcred --ignore-not-found;
+      ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "$REMOTE_USER@$STAGING_IP" "lxc exec $LXC_NODE -- kubectl delete secret gitlabcred --ignore-not-found;
       lxc exec $LXC_NODE -- kubectl create secret docker-registry gitlabcred --docker-server=$CI_REGISTRY --docker-username=$CR_DEPLOY_USER --docker-email=$GITLAB_EMAIL --docker-password=$CR_DEPLOY_TOKEN;
       lxc exec $LXC_NODE -- mkdir -p $LXC_FILE_PATH;
       lxc file push $REMOTE_FILE_PATH/cc-$CC_NAME-$K8S_VERSION.yaml $LXC_NODE/$LXC_FILE_PATH/;
       lxc exec $LXC_NODE -- kubectl apply -f $LXC_FILE_PATH/cc-$CC_NAME-$K8S_VERSION.yaml"
+  artifacts:
+    name: cc-manifests
+    paths:
+      - k8s
+
+run-benchmarks:
+  stage: evaluate
+  tags:
+    - ccaas-runner
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: ""
+  image: docker:26
+  services:
+    - name: docker:24.0.5-dind
+      alias: docker
+      #command: ["--tls=false"]
+  before_script:
+    - mkdir -p caliper/peer
+    - chmod 777 -R caliper
+    - cp $VAR_PATH/HFB_USR_PVT_KEY $VAR_PATH/HFB_USR_PUB_CERT $VAR_PATH/HFB_TLS_ROOT_CERT caliper/peer/
+    - apk add --no-cache --upgrade bash
+    - bash scripts/run-caliper.sh $HFB_CHAN_NAME $HFB_ORG_MSP HFB_USR_PVT_KEY HFB_USR_PUB_CERT HFB_TLS_ROOT_CERT $HFB_USR $HFB_PEER_HOST $HFB_PEER_PORT
+  script:
+    - docker run -v "$PWD"/caliper:/hyperledger/caliper/workspace -e NODE_TLS_REJECT_UNAUTHORIZED=0 --name caliper hyperledger/caliper:0.6.0 launch manager --caliper-bind-sut fabric:fabric-gateway --caliper-networkconfig network.yaml --caliper-benchconfig benchmarks/asset.yaml --caliper-flow-only-test
+    - docker wait caliper
+  artifacts:
+    name: caliper-report
+    paths:
+      - caliper/report.html
+  after_script:
+    - rm -r caliper/peer
+
+deploy-prod:
+  stage: deploy
+  tags:
+    - ccaas-runner
+  environment:
+    name: prod
+    url: https://prod.example.com
+  needs:
+    - deploy-staging
+#    - run-benchmarks
+  before_script:
+    - ls k8s
+    - K8S_VERSION=$(tr '.' '-' <<< $CC_VERSION)
+    - cat k8s/cc-$CC_NAME-$K8S_VERSION.yaml
+    - sed -i "s+$CC_ID_STAGING+$CC_ID_PROD+g" k8s/cc-$CC_NAME-$K8S_VERSION.yaml
+    - apt-get update && apt-get install -y openssh-client
+    - chmod 600 $VAR_PATH/KEY_FILE
+    - ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "$REMOTE_USER@$PROD_IP" "mkdir -p /home/ubuntu/manifests_new"  # fix dir issue
+  script:
+#    - scp -i "$KEY_FILE" -o StrictHostKeyChecking=no "./k8s/cc-$CC_NAME-$K8S_VERSION.yaml" "$REMOTE_USER@$PROD_IP:$REMOTE_FILE_PATH"
+    - scp -i "$KEY_FILE" -o StrictHostKeyChecking=no "./k8s/cc-$CC_NAME-$K8S_VERSION.yaml" "$REMOTE_USER@$PROD_IP:/home/ubuntu/manifests_new"
+    - >
+      ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "$REMOTE_USER@$PROD_IP" "ls /home/ubuntu; w; ls -al /home/ubuntu/manifests_new; kubectl delete secret gitlabcred --ignore-not-found;
+      kubectl create secret docker-registry gitlabcred --docker-server=$CI_REGISTRY --docker-username=$CR_DEPLOY_USER --docker-email=$GITLAB_EMAIL --docker-password=$CR_DEPLOY_TOKEN;
+      kubectl apply -f /home/ubuntu/manifests_new/cc-$CC_NAME-$K8S_VERSION.yaml"

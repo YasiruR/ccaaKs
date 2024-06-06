@@ -1,0 +1,18 @@
+test:
+  name: asset-contract-benchmark
+  description: A sample benchmark to test asset smart contract
+  workers:
+    number: 2
+  rounds:
+    - label: getAsset
+      description: Get asset benchmark
+      txDuration: 30
+      rateControl:
+        type: fixed-load
+        opts:
+          transactionLoad: 2
+      workload:
+        module: benchmarks/workload/get-asset.js
+        arguments:
+          assets: 10
+          contractId: asset
