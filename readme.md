@@ -284,5 +284,5 @@ control on chaincode deployments are not properly designed.
    \- CD becomes separated from CI\
    \- introduces peer administration into chaincode lifecycle
 5. Add commonly agreed testing package/framework for the chaincode package, which can be invoked either during
-   build-time (by CICD pipelines) or runtime (via `Init` function).
+   build-time (by CICD pipelines) or runtime (via `Init` function).\
    \- complexity in designing test framework to capture all adversarial outcomes

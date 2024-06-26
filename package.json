@@ -1,0 +1,17 @@
+{
+  "name": "ccaaks",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:YasiruR/ccaaKs.git"
+  },
+  "private": true,
+  "dependencies": {
+    "@hyperledger/caliper-core": "^0.6.0"
+  }
+}

@@ -15,6 +15,9 @@ import (
 const (
 	errOK     = "expected: 200, got: %d (msg: %s)"
 	errExpect = "expected: %s, got: %s"
+	clrBlue   = "blue"
+	ownrDavid = "David"
+	clrBrown  = "Brown"
 )
 
 var (
@@ -52,7 +55,7 @@ func TestSmartContractUpdateAsset(t *testing.T) {
 	stub := newMockStub()
 	testCreate(stub, t)
 
-	testAsset.Color = "blue"
+	testAsset.Color = clrBlue
 	testAsset.Value = 1500
 	testUpdate(stub, t)
 
@@ -115,12 +118,48 @@ func TestSmartContractTransferAsset(t *testing.T) {
 	testCreate(stub, t)
 
 	if res := stub.MockInvoke(`7`, [][]byte{
-		[]byte("TransferAsset"), []byte(strconv.Itoa(testAsset.ID)), []byte("David"),
+		[]byte("TransferAsset"), []byte(strconv.Itoa(testAsset.ID)), []byte(ownrDavid),
 	}); res.Status != shim.OK {
 		t.Fatalf(errOK, res.Status, res.Message)
 	}
 
-	testAsset.Owner = "David"
+	testAsset.Owner = ownrDavid
+	out := getState(stub, testAsset.ID, t)
+	in := marshalAsset()
+	if !bytes.Equal(in, out) {
+		t.Fatalf(errExpect, in, out)
+	}
+}
+
+func TestSmartContractChangeAssetColour(t *testing.T) {
+	stub := newMockStub()
+	testCreate(stub, t)
+
+	if res := stub.MockInvoke(`8`, [][]byte{
+		[]byte("ChangeAssetColour"), []byte(strconv.Itoa(testVehicle.ID)), []byte(clrBrown),
+	}); res.Status != shim.OK {
+		t.Fatalf(errOK, res.Status, res.Message)
+	}
+
+	testAsset.Color = clrBrown
+	out := getState(stub, testAsset.ID, t)
+	in := marshalAsset()
+	if !bytes.Equal(in, out) {
+		t.Fatalf(errExpect, in, out)
+	}
+}
+
+func TestSmartContractChangeAssetValue(t *testing.T) {
+	stub := newMockStub()
+	testCreate(stub, t)
+
+	if res := stub.MockInvoke(`9`, [][]byte{
+		[]byte("ChangeAssetValue"), []byte(strconv.Itoa(testVehicle.ID)), []byte("888"),
+	}); res.Status != shim.OK {
+		t.Fatalf(errOK, res.Status, res.Message)
+	}
+
+	testAsset.Value = 888
 	out := getState(stub, testAsset.ID, t)
 	in := marshalAsset()
 	if !bytes.Equal(in, out) {

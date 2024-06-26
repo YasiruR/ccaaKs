@@ -1,26 +1,31 @@
-# set envs
-
 stages:
   - validate
   - build
   - test
-  - deploy
+  - cleanup-scan
+  - pre-deploy
   - evaluate
+  - deploy
 
 variables:
   CC_NAME: asset
-  CC_VERSION: 0.22
-  CC_ID_STAGING: asset_0_22:f4a69b530e1f7ad77ddc6b43927e0786ef559c437e643f4f026d1df519787f0a
-  CC_ID_PROD: asset_0_22:prodtest
+  CC_VERSION: 0.28
+  CC_ID_STAGING: asset_0_28:076c9ba985edc96d6e2d9ef1537a4be9fbe276a3508ca9d5b48cc6a4cbe45a40
+  CC_ID_PROD: asset_0_28:prod
   CC_PORT: 6051
   REMOTE_FILE_PATH: "/home/${REMOTE_USER}/manifests"
   LXC_NODE: master-node2
   LXC_FILE_PATH: /root/manifests
   HFB_ORG_MSP: org-msp
-  HFB_CHAN_NAME: chan1
+  HFB_CHAN_NAME: chan8
   HFB_USR: peer1
   HFB_PEER_HOST: 172.17.0.1
   HFB_PEER_PORT: 30106
+
+  # project details
+  PROJECT_ID: 1328
+  REPOSITORY_ID: 124
+  GIT_URL: <gitlab-url>
 
 #workflow: #or .standard-rules
 #  rules:
@@ -92,6 +97,9 @@ build-image:
     - docker push "$CI_REGISTRY/$CI_PROJECT_PATH:$CC_VERSION"
   after_script:
     - docker logout "$CI_REGISTRY"
+  needs:
+    - go-lint
+    - sonarqube-check
 
 container_scanning:
   tags:
@@ -111,20 +119,30 @@ gemnasium-dependency_scanning:
   needs:
     - build-image
 
+## todo clean up job for build if scanning fails
+#cleanup-build:
+#  stage: cleanup-scan
+#  image: alpine:3.15.11
+#  variables:
+#    REGCTL_VERSION: v0.6.1
+#  needs:
+#    - container_scanning
+#    - gemnasium-dependency_scanning
+#  when: on_failure
+#  script:
+#    - curl --request DELETE --header "PRIVATE-TOKEN: $GITLAB_ADMIN_TOKEN" "$GITLAB_URL/api/v4/projects/$PROJECT_ID/registry/repositories/$REPOSITORY_ID/tags/$CC_VERSION"
+
 deploy-staging:
-  stage: deploy
+  stage: pre-deploy
   tags:
     - ccaas-runner
   environment:
     name: staging
-    url: https://staging.example.com
   before_script:
     - K8S_VERSION=$(tr '.' '-' <<< $CC_VERSION)
     - bash scripts/create-manifest.sh "$CC_ID_STAGING" "$CC_NAME" "$CC_VERSION" "$K8S_VERSION" "$CC_PORT" "$CI_REGISTRY/$CI_PROJECT_PATH"
     - apt-get update && apt-get install -y openssh-client
     - chmod 600 $VAR_PATH/KEY_FILE
-    - ls k8s
-    - cat k8s/cc-$CC_NAME-$K8S_VERSION.yaml
     - ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "$REMOTE_USER@$STAGING_IP" "mkdir -p $REMOTE_FILE_PATH"
   script:
     - scp -i "$KEY_FILE" -o StrictHostKeyChecking=no "./k8s/cc-$CC_NAME-$K8S_VERSION.yaml" "$REMOTE_USER@$STAGING_IP:$REMOTE_FILE_PATH"
@@ -138,6 +156,9 @@ deploy-staging:
     name: cc-manifests
     paths:
       - k8s
+  needs:
+    - container_scanning
+    - gemnasium-dependency_scanning
 
 run-benchmarks:
   stage: evaluate
@@ -167,6 +188,30 @@ run-benchmarks:
       - caliper/report.html
   after_script:
     - rm -r caliper/peer
+  needs:
+    - deploy-staging
+
+verify-performance:
+  stage: evaluate
+  tags:
+    - ccaas-runner
+  image: alpine:3.15.11   # chosen against python image due to absence of security vulnerabilities (as per Docker scout)
+  needs:
+    - run-benchmarks
+  before_script:
+    - apk update
+    - apk add py3-pip
+    - apk add jq
+    - pip3 --version
+    - pip3 install yq
+    - apk add bash
+  script:
+    - >
+      if bash scripts/check-threshold.sh; then
+        exit 0
+      else
+        exit 1
+      fi
 
 deploy-prod:
   stage: deploy
@@ -174,22 +219,22 @@ deploy-prod:
     - ccaas-runner
   environment:
     name: prod
-    url: https://prod.example.com
+    action: start
+  when: manual
   needs:
     - deploy-staging
-#    - run-benchmarks
+    - verify-performance
+  dependencies:
+    - deploy-staging
   before_script:
-    - ls k8s
     - K8S_VERSION=$(tr '.' '-' <<< $CC_VERSION)
-    - cat k8s/cc-$CC_NAME-$K8S_VERSION.yaml
     - sed -i "s+$CC_ID_STAGING+$CC_ID_PROD+g" k8s/cc-$CC_NAME-$K8S_VERSION.yaml
     - apt-get update && apt-get install -y openssh-client
     - chmod 600 $VAR_PATH/KEY_FILE
-    - ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "$REMOTE_USER@$PROD_IP" "mkdir -p /home/ubuntu/manifests_new"  # fix dir issue
+    - ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "$REMOTE_USER@$PROD_IP" "mkdir -p $REMOTE_FILE_PATH"  # fix dir issue
   script:
-#    - scp -i "$KEY_FILE" -o StrictHostKeyChecking=no "./k8s/cc-$CC_NAME-$K8S_VERSION.yaml" "$REMOTE_USER@$PROD_IP:$REMOTE_FILE_PATH"
-    - scp -i "$KEY_FILE" -o StrictHostKeyChecking=no "./k8s/cc-$CC_NAME-$K8S_VERSION.yaml" "$REMOTE_USER@$PROD_IP:/home/ubuntu/manifests_new"
+    - scp -i "$KEY_FILE" -o StrictHostKeyChecking=no "./k8s/cc-$CC_NAME-$K8S_VERSION.yaml" "$REMOTE_USER@$PROD_IP:$REMOTE_FILE_PATH"
     - >
-      ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "$REMOTE_USER@$PROD_IP" "ls /home/ubuntu; w; ls -al /home/ubuntu/manifests_new; kubectl delete secret gitlabcred --ignore-not-found;
+      ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "$REMOTE_USER@$PROD_IP" "kubectl delete secret gitlabcred --ignore-not-found;
       kubectl create secret docker-registry gitlabcred --docker-server=$CI_REGISTRY --docker-username=$CR_DEPLOY_USER --docker-email=$GITLAB_EMAIL --docker-password=$CR_DEPLOY_TOKEN;
-      kubectl apply -f /home/ubuntu/manifests_new/cc-$CC_NAME-$K8S_VERSION.yaml"
+      kubectl apply -f $REMOTE_FILE_PATH/cc-$CC_NAME-$K8S_VERSION.yaml"

@@ -1,0 +1,41 @@
+thresholds:
+  get-asset:
+    fail: 5
+    max-latency: 2.5
+    avg-latency: 1.5
+    throughput: 800
+  set-asset:
+    fail: 80
+    max-latency: 14.5
+    avg-latency: 10.5
+    throughput: 1
+#  get-vehicle:
+#    fail: 5
+#    max-latency: 2.5
+#    avg-latency: 1.5
+#    throughput: 800
+#  set-vehicle:
+#    fail: 80
+#    max-latency: 14.5
+#    avg-latency: 10.5
+#    throughput: 1
+#  get-book:
+#    fail: 5
+#    max-latency: 2.5
+#    avg-latency: 1.5
+#    throughput: 800
+#  set-book:
+#    fail: 80
+#    max-latency: 14.5
+#    avg-latency: 10.5
+#    throughput: 1
+#  get-house:
+#    fail: 5
+#    max-latency: 2.5
+#    avg-latency: 1.5
+#    throughput: 800
+#  set-house:
+#    fail: 80
+#    max-latency: 14.5
+#    avg-latency: 10.5
+#    throughput: 1
