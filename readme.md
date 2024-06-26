@@ -16,7 +16,7 @@ The following diagram illustrates how the life-cycle of a chaincode is impacted 
 the default and CCaaKS processes.
 
 <div align="center">
-    <img src="docs/imgs/process.png">
+    <img src="docs/imgs/cicd.png">
 </div>
 
 ## Impact on chaincode life-cycle
