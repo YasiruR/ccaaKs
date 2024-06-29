@@ -6,7 +6,7 @@ import csv
 import pandas as pd
 
 n_jobs=10
-jobs=['lint', 'test', 'sonar', 'build', 'cont', 'depend', 'pre', 'bench', 'verify', 'deploy']
+jobs=['lint', 'test', 'sonar', 'build', 'cont', 'depend', 'stag', 'bench', 'verify', 'prod']
 #jobs=[1, 2, 3, 4, 5, 6, 7, 8, 9]
 job_col_index=[5,6,7,9,10,11,13,14,15,17]  # column indices of jobs
 
