@@ -2,22 +2,22 @@ stages:
   - validate
   - build
   - test
-  - cleanup-scan
   - pre-deploy
   - evaluate
+  - cleanup
   - deploy
 
 variables:
   CC_NAME: asset
   CC_VERSION: 0.28
-  CC_ID_STAGING: asset_0_28:076c9ba985edc96d6e2d9ef1537a4be9fbe276a3508ca9d5b48cc6a4cbe45a40
-  CC_ID_PROD: asset_0_28:prod
+  CC_ID_STAGING: asset_0_28:<hash>
+  CC_ID_PROD: asset_0_28:<hash>
   CC_PORT: 6051
   REMOTE_FILE_PATH: "/home/${REMOTE_USER}/manifests"
-  LXC_NODE: master-node2
+  LXC_NODE: <node-name>
   LXC_FILE_PATH: /root/manifests
   HFB_ORG_MSP: org-msp
-  HFB_CHAN_NAME: chan8
+  HFB_CHAN_NAME: <chan-name>
   HFB_USR: peer1
   HFB_PEER_HOST: 172.17.0.1
   HFB_PEER_PORT: 30106
@@ -25,7 +25,7 @@ variables:
   # project details
   PROJECT_ID: 1328
   REPOSITORY_ID: 124
-  GIT_URL: <gitlab-url>
+  GITLAB_URL: <gitlab-url
 
 #workflow: #or .standard-rules
 #  rules:
@@ -119,18 +119,26 @@ gemnasium-dependency_scanning:
   needs:
     - build-image
 
-## todo clean up job for build if scanning fails
-#cleanup-build:
-#  stage: cleanup-scan
-#  image: alpine:3.15.11
-#  variables:
-#    REGCTL_VERSION: v0.6.1
-#  needs:
-#    - container_scanning
-#    - gemnasium-dependency_scanning
-#  when: on_failure
-#  script:
-#    - curl --request DELETE --header "PRIVATE-TOKEN: $GITLAB_ADMIN_TOKEN" "$GITLAB_URL/api/v4/projects/$PROJECT_ID/registry/repositories/$REPOSITORY_ID/tags/$CC_VERSION"
+cleanup-test:
+  stage: cleanup
+  image: alpine:3.15.11
+  variables:
+    REGCTL_VERSION: v0.6.1
+  tags:
+    - ccaas-runner
+  needs:
+    - container_scanning
+    - gemnasium-dependency_scanning
+  when: on_failure
+  before_script:
+    - apk update
+    - apk add curl
+  script:
+    - >-
+      curl
+      --request DELETE
+      --header "PRIVATE-TOKEN: $GITLAB_ADMIN_TOKEN"
+      "$GITLAB_URL/api/v4/projects/$PROJECT_ID/registry/repositories/$REPOSITORY_ID/tags/$CC_VERSION"
 
 deploy-staging:
   stage: pre-deploy
@@ -159,6 +167,26 @@ deploy-staging:
   needs:
     - container_scanning
     - gemnasium-dependency_scanning
+
+cleanup-deploy:
+  stage: cleanup
+  image: alpine:3.15.11
+  variables:
+    REGCTL_VERSION: v0.6.1
+  tags:
+    - ccaas-runner
+  needs:
+    - deploy-staging
+  when: on_failure
+  before_script:
+    - apk update
+    - apk add curl
+  script:
+    - >-
+      curl
+      --request DELETE
+      --header "PRIVATE-TOKEN: $GITLAB_ADMIN_TOKEN"
+      "$GITLAB_URL/api/v4/projects/$PROJECT_ID/registry/repositories/$REPOSITORY_ID/tags/$CC_VERSION"
 
 run-benchmarks:
   stage: evaluate
@@ -191,6 +219,26 @@ run-benchmarks:
   needs:
     - deploy-staging
 
+cleanup-benchmarks:
+  stage: cleanup
+  image: alpine:3.15.11
+  variables:
+    REGCTL_VERSION: v0.6.1
+  tags:
+    - ccaas-runner
+  needs:
+    - run-benchmarks
+  when: on_failure
+  before_script:
+    - apk update
+    - apk add curl
+  script:
+    - >-
+      curl
+      --request DELETE
+      --header "PRIVATE-TOKEN: $GITLAB_ADMIN_TOKEN"
+      "$GITLAB_URL/api/v4/projects/$PROJECT_ID/registry/repositories/$REPOSITORY_ID/tags/$CC_VERSION"
+
 verify-performance:
   stage: evaluate
   tags:
@@ -212,6 +260,26 @@ verify-performance:
       else
         exit 1
       fi
+
+cleanup-evaluate:
+  stage: cleanup
+  image: alpine:3.15.11
+  variables:
+    REGCTL_VERSION: v0.6.1
+  tags:
+    - ccaas-runner
+  needs:
+    - verify-performance
+  when: on_failure
+  before_script:
+    - apk update
+    - apk add curl
+  script:
+    - >-
+      curl
+      --request DELETE
+      --header "PRIVATE-TOKEN: $GITLAB_ADMIN_TOKEN"
+      "$GITLAB_URL/api/v4/projects/$PROJECT_ID/registry/repositories/$REPOSITORY_ID/tags/$CC_VERSION"
 
 deploy-prod:
   stage: deploy
